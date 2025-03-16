@@ -1,12 +1,29 @@
-CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch  --nproc_per_node=4 --master-port=8989 train.py \
-    --batch_size 16 \
-    --num_workers 48 \
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch  --nproc_per_node=1 --master-port=8989 train.py \
+    --batch_size 8 \
+    --num_workers 12 \
     --lr_rate 0.0005 \
-    --data_path /path/SOD/DUTS \
-    --sam_ckpt /path/sam_vit_b_01ec64.pth \
-    --img_size 512
+    --data_path /home/linj/workspace/vsod/datasets/ \
+    --sam_ckpt ./sam_vit_b_01ec64.pth \
+    --dataset rdvs \
+    --img_size 512 \
+    --epoch 20
 
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch  --nproc_per_node=1 --master-port=8989 train.py \
+    --batch_size 8 \
+    --num_workers 12 \
+    --lr_rate 0.0005 \
+    --data_path /home/linj/workspace/vsod/datasets/ \
+    --sam_ckpt ./sam_vit_b_01ec64.pth \
+    --dataset vidsod_100 \
+    --img_size 512 \
+    --epoch 10
 
-
-
-
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch  --nproc_per_node=1 --master-port=8989 train.py \
+    --batch_size 8 \
+    --num_workers 12 \
+    --lr_rate 0.0005 \
+    --data_path /home/linj/workspace/vsod/datasets/ \
+    --sam_ckpt ./sam_vit_b_01ec64.pth \
+    --dataset dvisal \
+    --img_size 512 \
+    --epoch 10

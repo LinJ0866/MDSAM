@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument(
         "--local-rank", type=int, default=-1, help="For distributed training: local_rank"
     )
+    parser.add_argument('--dataset', type=str, choices=['rdvs', 'vidsod_100', 'dvisal'])
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -101,40 +102,40 @@ def trainer(net, dataloader, loss_func, optimizer, local_rank):
     temp_cost=time.time()-start
     print("local_rank:{}, loss:{}, mae:{}, cost_time:{:.0f}m:{:.0f}s".format(local_rank, loss_avg.avg, mae_avg.avg, temp_cost//60, temp_cost%60))
  
-def valer(net, dataloader, local_rank):
-    net.eval()
-    if local_rank == 0:
-        print("start valling")
+# def valer(net, dataloader, local_rank):
+#     net.eval()
+#     if local_rank == 0:
+#         print("start valling")
 
-    start = time.time()
+#     start = time.time()
 
-    sigmoid = torch.nn.Sigmoid()
-    mae_avg = AvgMeter()
-    with torch.no_grad():
-        if local_rank == 0:
-            data_generator = tqdm(dataloader)
-        else:
-            data_generator = dataloader
-        for data in data_generator:
+#     sigmoid = torch.nn.Sigmoid()
+#     mae_avg = AvgMeter()
+#     with torch.no_grad():
+#         if local_rank == 0:
+#             data_generator = tqdm(dataloader)
+#         else:
+#             data_generator = dataloader
+#         for data in data_generator:
                 
-            img = data["img"].to(device).to(torch.float32)
-            ori_label = data['ori_mask'].to(device)
+#             img = data["img"].to(device).to(torch.float32)
+#             ori_label = data['ori_mask'].to(device)
             
-            out, coarse_out= net(img)
-            out = sigmoid(out)
-            out = torch.nn.functional.interpolate(out, [ori_label.shape[1],ori_label.shape[2]], mode = 'bilinear', align_corners = False)
+#             out, coarse_out= net(img)
+#             out = sigmoid(out)
+#             out = torch.nn.functional.interpolate(out, [ori_label.shape[1],ori_label.shape[2]], mode = 'bilinear', align_corners = False)
 
-            #Since the float values are converted to int when saving the mask, 
-            #multiple decimal will be lost, which may result in minor deviations from the evaluation code.
-            img_mae=torch.mean(torch.abs(out - ori_label))
+#             #Since the float values are converted to int when saving the mask, 
+#             #multiple decimal will be lost, which may result in minor deviations from the evaluation code.
+#             img_mae=torch.mean(torch.abs(out - ori_label))
 
-            mae_avg.update(img_mae.item(),n=1)
+#             mae_avg.update(img_mae.item(),n=1)
     
-    temp_cost=time.time() - start
+#     temp_cost=time.time() - start
 
-    print("local_rank:{}, val_mae:{}, cost_time:{:.0f}m:{:.0f}s".format(local_rank, mae_avg.avg, temp_cost//60, temp_cost%60))
+#     print("local_rank:{}, val_mae:{}, cost_time:{:.0f}m:{:.0f}s".format(local_rank, mae_avg.avg, temp_cost//60, temp_cost%60))
 
-    return mae_avg.avg
+#     return mae_avg.avg
 
 
 
@@ -203,8 +204,8 @@ if __name__ == "__main__":
         if args.local_rank == 0:
             print(state)
 
-    trainLoader = getSODDataloader(args.data_path, args.batch_size, args.num_workers, 'train', img_size= args.img_size)
-    valLoader = getSODDataloader(args.data_path, 1, args.num_workers, 'test', args.local_rank, img_size= args.img_size, max_rank = dist.get_world_size())
+    trainLoader = getSODDataloader(args.data_path, args.dataset, args.batch_size, args.num_workers, 'train', img_size= args.img_size)
+    # valLoader = getSODDataloader(args.data_path, 1, args.num_workers, 'test', args.local_rank, img_size= args.img_size, max_rank = dist.get_world_size())
 
     loss_func = LossFunc
 
@@ -278,25 +279,28 @@ if __name__ == "__main__":
             print("epochs {} start".format(i))
 
         trainer(net, trainLoader, loss_func, optimizer, local_rank=args.local_rank)
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir)
+        torch.save({"model": net.state_dict(),"optimizer":optimizer.state_dict()}, "{}/latest.pth".format(args.save_dir))
 
-        local_mae = valer(net, valLoader, local_rank = args.local_rank)
+        # local_mae = valer(net, valLoader, local_rank = args.local_rank)
 
-        #average the results from multi-GPU inference
-        sum_result = torch.tensor(local_mae).to(device)
-        dist.reduce(sum_result, dst = 0, op = dist.ReduceOp.SUM)
+        # #average the results from multi-GPU inference
+        # sum_result = torch.tensor(local_mae).to(device)
+        # dist.reduce(sum_result, dst = 0, op = dist.ReduceOp.SUM)
 
-        if args.local_rank == 0:
-            mae = sum_result.item() / dist.get_world_size()
-            print("current mae:{}".format(mae))
-            #save the best result
-            if(mae < best_mae):
-                best_mae = mae
-                best_epoch = i
-                print("save epoch {} in {}".format(i, "{}/model_epoch{}.pth".format(args.save_dir,i)))
-                if not os.path.exists(args.save_dir):
-                    os.makedirs(args.save_dir)
-                torch.save({"model": net.state_dict(),"optimizer":optimizer.state_dict()}, "{}/model_epoch{}.pth".format(args.save_dir,i))
-            print("best epoch:{}, mae:{}".format(best_epoch,best_mae))
+        # if args.local_rank == 0:
+        #     mae = sum_result.item() / dist.get_world_size()
+        #     print("current mae:{}".format(mae))
+        #     #save the best result
+        #     if(mae < best_mae):
+        #         best_mae = mae
+        #         best_epoch = i
+        #         print("save epoch {} in {}".format(i, "{}/model_epoch{}.pth".format(args.save_dir,i)))
+        #         if not os.path.exists(args.save_dir):
+        #             os.makedirs(args.save_dir)
+        #         torch.save({"model": net.state_dict(),"optimizer":optimizer.state_dict()}, "{}/model_epoch{}.pth".format(args.save_dir,i))
+        #     print("best epoch:{}, mae:{}".format(best_epoch,best_mae))
         
 
 

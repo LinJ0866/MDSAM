@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.utils.data import Dataset, DataLoader
 from glob import glob
@@ -7,12 +8,64 @@ from albumentations.pytorch.transforms import ToTensorV2
 from torch.utils.data.distributed import DistributedSampler
 
 class NormalDataset(Dataset):
-    def __init__(self,data_path,transform, mode = 'train', local_rank = 0, max_rank = 1):
+    def __init__(self, data_path, dataset, transform, mode = 'train', local_rank = 0, max_rank = 1):
+        self.imgs_list = []
+        self.masks_list = []
+
+        if dataset == 'rdvs':
+            lable_rgb = 'rgb'
+            lable_depth = 'Depth'
+            lable_gt = 'ground-truth'
+            lable_flow = 'FLOW'
+
+            if mode == 'train':
+                data_dir = os.path.join(data_path, 'RDVS/train')
+            else:
+                data_dir = os.path.join(data_path, 'RDVS/test')
+        elif dataset == 'vidsod_100':
+            lable_rgb = 'rgb'
+            lable_depth = 'depth'
+            lable_gt = 'gt'
+            lable_flow = 'flow'
+            
+            if mode == 'train':
+                data_dir = os.path.join(data_path, 'vidsod_100/train')
+            else:
+                data_dir = os.path.join(data_path, 'vidsod_100/test')
+        elif dataset == 'dvisal':
+            lable_rgb = 'RGB'
+            lable_depth = 'Depth'
+            lable_gt = 'GT'
+            lable_flow = 'flow'
+
+            data_dir = os.path.join(data_path, 'DViSal_dataset/data')
+
+            if mode == 'train':
+                dvi_mode = 'train'
+            else:
+                dvi_mode = 'test_all'
+        else:
+            raise 'dataset is not support now.'
         
-        self.imgs_list=glob(data_path+"/image/*")
-        self.masks_list=glob(data_path+"/mask/*")
-        self.imgs_list.sort()
-        self.masks_list.sort()
+        if dataset == 'dvisal':
+            with open(os.path.join(data_dir, '../', dvi_mode+'.txt'), mode='r') as f:
+                subsets = set(f.read().splitlines())
+        else:
+            subsets = os.listdir(data_dir)
+        
+        for video in subsets:
+            video_path = os.path.join(data_dir, video)
+            rgb_path = os.path.join(video_path, lable_rgb)
+            depth_path = os.path.join(video_path, lable_depth)
+            gt_path = os.path.join(video_path, lable_gt)
+            flow_path = os.path.join(video_path, lable_flow)
+            frames = os.listdir(rgb_path)
+            frames = sorted(frames)
+            for frame in frames[:-1]:
+                img_file_path = os.path.join(rgb_path, frame)
+                if os.path.isfile(img_file_path):
+                    self.imgs_list.append(img_file_path)
+                    self.masks_list.append(os.path.join(gt_path, frame.replace('jpg', 'png')))
 
         self.transform=transform
 
@@ -30,9 +83,8 @@ class NormalDataset(Dataset):
     
     
     def __getitem__(self,index):
-        # to prevent '\' when using glob in Windows
-        img_dir= self.imgs_list[index] if not "\\" in self.imgs_list[index] else self.imgs_list[index]
-        mask_dir= self.masks_list[index] if not "\\" in self.masks_list[index] else self.masks_list[index]
+        img_dir= self.imgs_list[index]
+        mask_dir= self.masks_list[index]
 
         #print(img_dir, mask_dir)
 
@@ -85,16 +137,16 @@ def get_augmentation(version=0, img_size = 512):
     return transforms
 
 
-def getSODDataloader(data_path, batch_size, num_workers, mode, local_rank = 0, max_rank = 1, img_size = 512):
+def getSODDataloader(data_path, dataset, batch_size, num_workers, mode, local_rank = 0, max_rank = 1, img_size = 512):
     if mode == "train":
         transform = get_augmentation(0, img_size)
-        dataset = NormalDataset(data_path + "/" + mode, transform, mode)
+        dataset = NormalDataset(data_path, dataset, transform, mode)
         sampler = DistributedSampler(dataset)
         dataLoader = DataLoader(dataset,batch_size = batch_size, sampler = sampler, num_workers = num_workers)
     else:
         transform = get_augmentation(1, img_size)
         # max_rank represents the number of GPUs used for inference
         # local_rank represents the GPU currently in use.
-        dataset = NormalDataset(data_path+ "/" + mode, transform, mode, local_rank, max_rank)
+        dataset = NormalDataset(data_path, dataset, transform, mode, local_rank, max_rank)
         dataLoader = DataLoader(dataset, batch_size = batch_size, num_workers = num_workers)
     return dataLoader
